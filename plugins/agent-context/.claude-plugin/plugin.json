@@ -1,0 +1,10 @@
+{
+  "name": "agent-context",
+  "version": "1.0.0",
+  "description": "Quality for the files an agent reads every session: lean CLAUDE.md / AGENTS.md files (with a linter), and a project constitution whose every principle carries its why.",
+  "author": { "name": "Tal Afek", "url": "https://github.com/talafek96" },
+  "homepage": "https://github.com/talafek96/agent-toolkit",
+  "repository": "https://github.com/talafek96/agent-toolkit",
+  "license": "Apache-2.0",
+  "keywords": ["claude-md", "agents-md", "constitution", "spec-kit", "context", "lint"]
+}

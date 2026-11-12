@@ -29,5 +29,5 @@ jobs:
         run: python scripts/validate.py
       - name: Bundled scripts run
         run: |
-          python plugins/claude-md-standards/skills/claude-md-standards/scripts/lint_claude_md.py --help
-          python plugins/constitution-writer/skills/constitution-writer/scripts/check_constitution.py tests/fixtures/good-constitution.md
+          python plugins/agent-context/skills/claude-md-standards/scripts/lint_claude_md.py --help
+          python plugins/agent-context/skills/constitution-writer/scripts/check_constitution.py tests/fixtures/good-constitution.md

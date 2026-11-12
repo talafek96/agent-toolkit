@@ -3,11 +3,10 @@
 Plugins for making a repo work well with coding agents. Installable as a
 [Claude Code plugin marketplace](https://docs.claude.com/en/docs/claude-code/plugin-marketplaces).
 
-| Plugin | What it does |
-|---|---|
-| `claude-md-standards` | Write, lint and review `CLAUDE.md` / `AGENTS.md`. Keeps only what the agent wouldn't do untold. Ships a linter (`scripts/lint_claude_md.py`). |
-| `orchestrate` | Lead a feature as the senior engineer: understand the design, brief cheaper subagents with how / what / why, review every deliverable against the design, and report at checkpoints. Raises to you only what truly needs you. Start it with `/orchestrate <feature or spec>`. |
-| `constitution-writer` | Write or review a project constitution: the few principles the agent reads every session, each with its why. In an existing repo it interviews the people who built it instead of guessing the reasons, routes every rule to the right file, and wires the result into `CLAUDE.md`. |
+| Plugin | Skills inside | What it does |
+|---|---|---|
+| `agent-context` | `claude-md-standards`, `constitution-writer` | Quality for the files the agent reads every session. **claude-md-standards** writes, lints and reviews `CLAUDE.md` / `AGENTS.md`, keeping only what the agent wouldn't do untold (ships a linter). **constitution-writer** writes or reviews a project constitution: a few general principles, each with its why. In an existing repo it asks the people who built it instead of guessing the reasons, routes every specific rule to the right file, and wires the result into `CLAUDE.md`. |
+| `orchestrate` | `orchestrate` | Lead a feature as the senior engineer: understand the design, brief cheaper subagents with how / what / why, review every deliverable against the design, and report at checkpoints. Raises to you only what truly needs you. Start it with `/orchestrate <feature or spec>`. |
 
 ## Install
 
@@ -15,8 +14,7 @@ In Claude Code:
 
 ```text
 /plugin marketplace add talafek96/agent-toolkit
-/plugin install claude-md-standards@agent-toolkit
-/plugin install constitution-writer@agent-toolkit
+/plugin install agent-context@agent-toolkit
 /plugin install orchestrate@agent-toolkit
 ```
 
