@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - name: Ruff check
+        run: uvx ruff check .
+
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Marketplace and skill manifests
+        run: python scripts/validate.py
+      - name: Bundled scripts run
+        run: |
+          python plugins/claude-md-standards/skills/claude-md-standards/scripts/lint_claude_md.py --help
+          python plugins/constitution-writer/skills/constitution-writer/scripts/check_constitution.py tests/fixtures/good-constitution.md

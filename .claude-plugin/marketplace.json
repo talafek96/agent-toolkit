@@ -1,0 +1,25 @@
+{
+  "name": "agent-toolkit",
+  "description": "Plugins for making a repo work well with coding agents: lean CLAUDE.md files, a project constitution with a why for every principle, and a lead agent that delegates and reviews.",
+  "owner": {
+    "name": "Tal Afek",
+    "url": "https://github.com/talafek96"
+  },
+  "plugins": [
+    {
+      "name": "claude-md-standards",
+      "source": "./plugins/claude-md-standards",
+      "description": "Write, lint and review CLAUDE.md / AGENTS.md files: keep only what the agent wouldn't do untold. Ships a linter."
+    },
+    {
+      "name": "constitution-writer",
+      "source": "./plugins/constitution-writer",
+      "description": "Write or review a project constitution: interview the people who built the repo for the why, route each rule to the right file, and wire it into CLAUDE.md."
+    },
+    {
+      "name": "orchestrate",
+      "source": "./plugins/orchestrate",
+      "description": "Lead a feature as the senior engineer: a strong model plans, briefs cheaper subagents, reviews their work adversarially and reports at checkpoints, raising to you only what truly needs you."
+    }
+  ]
+}

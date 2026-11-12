@@ -1,0 +1,78 @@
+{
+  "skill_name": "constitution-writer",
+  "evals": [
+    {
+      "id": 1,
+      "name": "brownfield-solo-lead",
+      "prompt": "We're onboarding our shop repo to Claude Code and Spec Kit. The repo is at <shop-repo>. I'm the tech lead; the rest of the team is on vacation this week. Write us a constitution.",
+      "expected_output": "A draft built from evidence in the repo, with the reasons it can't know left as open questions for the team, a routing table, known gaps (payments swallows errors), and wiring instructions.",
+      "files": [
+        "fixtures/shop-repo"
+      ],
+      "assertions": [
+        "Every principle has a why, or an explicit open question / [ASK] marker where the why is unknown",
+        "Does not present reasons as the team's that appear nowhere in the repo or history (no invented whys)",
+        "Has a test-integrity principle (never change a test to make it pass) citing the history (commit about #41) as evidence",
+        "Integer cents appears as a rule/mechanics under a general principle (e.g. exactness), not as a principle of its own; the float revert is cited",
+        "Ruff / PEP8 / line length / Python version are NOT principles in the constitution",
+        "Lists the payments client swallowing errors as a known gap (code vs belief), not as a reason to soften fail-fast",
+        "Has a routing table (or equivalent) saying where non-constitutional items go",
+        "Says to @-import the constitution in CLAUDE.md",
+        "Constitution is under 150 lines and has no change log / sync-impact report",
+        "Produces questions meant for the team / people who built the repo",
+        "General principles only: no principle names a specific module, field, tool, service or number in its rule bullets (specifics appear only as linked Mechanics or in the routing table)",
+        "The constitution file itself contains no [ASK]/TODO/meta-commentary blocks; open questions live in the response",
+        "The constitution file has no (proposed)/[ASK]/TODO markers; every principle in it is backed by evidence or the user's words (or, for a dictated belief, a recommended reason flagged in the response for confirmation)",
+        "The response lists recommended principles for topics the evidence doesn't cover, each with why it is recommended and the question that settles it",
+        "Has a testing-levels section based on the repo's real levels (unit, comp, system as in CI), with no repo paths in it"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "dictated-new-go-repo",
+      "prompt": "Starting a new payments-reconciliation service in Go, repo is empty for now. My manager gave me our team's 'we believe' list: 1) crash on bad state 2) nobody edits a test just to make it green 3) every external call has a timeout 4) gofmt + golangci-lint on every PR 5) we use Postgres and sqlc 6) design doc before any feature that takes more than 2 days 7) customer money is never lost or double-counted. Write the constitution for the repo.",
+      "expected_output": "Principles for the beliefs, with the manager's missing reasons asked for rather than invented; gofmt/lint routed to tooling, Postgres/sqlc to CLAUDE.md; money first.",
+      "files": [],
+      "assertions": [
+        "gofmt / golangci-lint is not a principle (routed to CI/tooling or CLAUDE.md)",
+        "Postgres / sqlc is not a principle (routed to CLAUDE.md or a project-facts file)",
+        "Every principle has a why or an explicit question asking the manager for it",
+        "Flags that the manager's list gave no reasons, and asks for them (questions for the manager)",
+        "Customer money principle is first or marked as the top priority / non-negotiable",
+        "At most 2 principles marked NON-NEGOTIABLE",
+        "No change log / sync-impact report / version history in the file",
+        "Asks which principle wins in a conflict, or states the ordering rationale",
+        "General principles only: no principle names a specific module, field, tool, service or number in its rule bullets (specifics appear only as linked Mechanics or in the routing table)",
+        "'Every external call has a timeout' and 'design doc for features over 2 days' are routed as rules/mechanics under general principles, not principles of their own",
+        "The constitution file itself contains no [ASK]/TODO/meta-commentary blocks; open questions live in the response",
+        "The constitution file has no (proposed)/[ASK]/TODO markers; every principle in it is backed by evidence or the user's words (or, for a dictated belief, a recommended reason flagged in the response for confirmation)",
+        "The response lists recommended principles for topics the evidence doesn't cover, each with why it is recommended and the question that settles it"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "review-bloated",
+      "prompt": "Our constitution is at <constitution.md>. It feels bloated, and the agent keeps doing weird things like editing tests until CI is green. Review it and give me a fixed version.",
+      "expected_output": "Identifies that Principle II tells the agent to fix tests; reverses it; moves Java style to a rules file and infra facts to CLAUDE.md; cuts vague principles; removes change log; keeps money principle.",
+      "files": [
+        "fixtures/bloated-constitution.md"
+      ],
+      "assertions": [
+        "Identifies 'fix the test so CI is green' as the cause of the test-editing behavior",
+        "Fixed version forbids changing tests to make them pass",
+        "Java style rules are removed from the constitution and routed to a rules file / formatter",
+        "Infrastructure facts (AWS, RDS host) removed from the constitution and routed to CLAUDE.md / docs",
+        "Sync impact report / version history removed from the file",
+        "At most 2 NON-NEGOTIABLE markers in the fixed version",
+        "The money rule is kept, but as mechanics under a general principle (or routed to a rules file), not as its own principle",
+        "Every principle in the fixed version carries a reason (a Why line or inline), or the response flags the reason as unconfirmed",
+        "No [RATIFICATION_DATE]-style placeholder remains",
+        "check_constitution.py on the fixed version reports 0 errors",
+        "General principles only: no principle names a specific module, field, tool, service or number in its rule bullets (specifics appear only as linked Mechanics or in the routing table)",
+        "The constitution file itself contains no [ASK]/TODO/meta-commentary blocks; open questions live in the response",
+        "The constitution file has no (proposed)/[ASK]/TODO markers; every principle in it is backed by evidence or the user's words (or, for a dictated belief, a recommended reason flagged in the response for confirmation)",
+        "The response lists recommended principles for topics the evidence doesn't cover, each with why it is recommended and the question that settles it"
+      ]
+    }
+  ]
+}

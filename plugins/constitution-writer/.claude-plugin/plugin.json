@@ -1,0 +1,10 @@
+{
+  "name": "constitution-writer",
+  "version": "0.1.0",
+  "description": "Write or review a project constitution: interview the people who built the repo for the why, route each rule to the right file, and wire it into CLAUDE.md.",
+  "author": { "name": "Tal Afek", "url": "https://github.com/talafek96" },
+  "homepage": "https://github.com/talafek96/agent-toolkit",
+  "repository": "https://github.com/talafek96/agent-toolkit",
+  "license": "Apache-2.0",
+  "keywords": ["constitution", "spec-kit", "principles", "onboarding"]
+}

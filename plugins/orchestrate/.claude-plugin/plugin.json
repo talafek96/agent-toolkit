@@ -1,0 +1,10 @@
+{
+  "name": "orchestrate",
+  "version": "1.0.0",
+  "description": "Lead a feature as the senior engineer: a strong model plans, briefs cheaper subagents, reviews their work adversarially and reports at checkpoints, raising to you only what truly needs you.",
+  "author": { "name": "Tal Afek", "url": "https://github.com/talafek96" },
+  "homepage": "https://github.com/talafek96/agent-toolkit",
+  "repository": "https://github.com/talafek96/agent-toolkit",
+  "license": "Apache-2.0",
+  "keywords": ["subagents", "orchestration", "review", "spec-kit", "cost"]
+}

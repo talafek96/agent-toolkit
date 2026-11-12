@@ -1,0 +1,10 @@
+{
+  "name": "claude-md-standards",
+  "version": "1.0.0",
+  "description": "Write, lint and review CLAUDE.md / AGENTS.md files: keep only what the agent wouldn't do untold. Ships a linter.",
+  "author": { "name": "Tal Afek", "url": "https://github.com/talafek96" },
+  "homepage": "https://github.com/talafek96/agent-toolkit",
+  "repository": "https://github.com/talafek96/agent-toolkit",
+  "license": "Apache-2.0",
+  "keywords": ["claude-md", "agents-md", "lint", "context"]
+}
