@@ -12,6 +12,11 @@
       "description": "Quality for the files an agent reads every session: lean CLAUDE.md / AGENTS.md files (with a linter), and a project constitution whose every principle carries its why."
     },
     {
+      "name": "repo-memory",
+      "source": "./plugins/repo-memory",
+      "description": "Memory an agent can trust, kept in the repo: PITFALLS.md is shared knowledge on main, HANDOFF.md is the state of one piece of work on its branch. Loaded at every session start; nothing project-related is private."
+    },
+    {
       "name": "orchestrate",
       "source": "./plugins/orchestrate",
       "description": "Lead a feature as the senior engineer: a strong model plans, briefs cheaper subagents, reviews their work adversarially and reports at checkpoints, raising to you only what truly needs you."

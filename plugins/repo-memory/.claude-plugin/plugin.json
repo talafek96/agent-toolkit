@@ -1,0 +1,10 @@
+{
+  "name": "repo-memory",
+  "version": "0.1.0",
+  "description": "Memory an agent can trust, kept in the repo: PITFALLS.md is shared knowledge on main, HANDOFF.md is the state of one piece of work on its branch. Loaded at every session start; nothing project-related is private.",
+  "author": { "name": "Tal Afek", "url": "https://github.com/talafek96" },
+  "homepage": "https://github.com/talafek96/agent-toolkit",
+  "repository": "https://github.com/talafek96/agent-toolkit",
+  "license": "Apache-2.0",
+  "keywords": ["memory", "handoff", "pitfalls", "session", "context"]
+}

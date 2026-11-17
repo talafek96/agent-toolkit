@@ -1,0 +1,13 @@
+{
+  "description": "Load the branch's HANDOFF.md and the PITFALLS.md headings at session start, only in repos that opted in with .claude/rules/memory.md",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py\"" }
+        ]
+      }
+    ]
+  }
+}

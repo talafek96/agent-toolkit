@@ -1,0 +1,64 @@
+{
+  "skill_name": "repo-memory",
+  "evals": [
+    {
+      "id": 1,
+      "name": "setup",
+      "prompt": "I want Claude to remember things across sessions in our shop repo, like lessons we learned and where I left off. Set it up. Repo: <repo>",
+      "files": [
+        "fixtures/setup-repo"
+      ],
+      "assertions": [
+        "Creates a rule file (or CLAUDE.md section) that says PITFALLS.md is shared knowledge committed on main and HANDOFF.md is per-branch work state, deleted before merge",
+        "Removes HANDOFF.md and PITFALLS.md from .gitignore (they become tracked), explaining why",
+        "Keeps the existing PITFALLS content (both lessons) instead of overwriting it",
+        "Flags the HANDOFF.md on main: moves it to a branch or closes it, and notes that 'I prefer short answers' is personal and belongs in CLAUDE.local.md",
+        "CLAUDE.local.md (personal preferences) is git-ignored",
+        "CLAUDE.md gets at most a short pointer, not a copy of the rules",
+        "Offers (does not force) a merge guard: PR checklist line or CI check against HANDOFF.md on main",
+        "Does not make the memory private or untracked in any way",
+        "The HANDOFF.md on main ends up off main: moved to a branch or closed, not left untracked on main"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "wrap-session",
+      "prompt": "Let's stop here for today, wrap up. (Repo: <repo>; what happened this session: <session-notes>) (Config: the repo's .claude/rules/memory.md only; no wrap-up skill.)",
+      "files": [
+        "fixtures/wrap-repo",
+        "fixtures/wrap-session-notes.txt"
+      ],
+      "assertions": [
+        "HANDOFF.md is replaced, not appended: the stale 'Done: nothing yet' and old 'Next' list are gone",
+        "HANDOFF.md has goal, what's done (with how it was verified), ordered next steps, and open decisions",
+        "Expiry dates and the component test appear as next steps; code stacking appears as an open decision with who decides",
+        "PITFALLS.md gets an entry for the double-applied discount, headed by the symptom (e.g. '19% off' / discount applied twice), with cause, fix and where it's fixed",
+        "No PITFALLS entry for the README typo",
+        "The 50% cap is recorded somewhere durable beyond the handoff (CLAUDE.md, a rules file, the constitution, a spec, or a code comment/test), since it's company policy for all future codes",
+        "HANDOFF.md stays on the branch (not moved to main) and the memory changes are committed",
+        "HANDOFF.md does not narrate the session or copy commit messages wholesale",
+        "Only memory files are committed (no stray build artifacts)"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "close-branch",
+      "prompt": "Expiry is done and finance confirmed one code per order. We're about to merge this branch into main, close it out. (Repo: <repo>) (Config: the repo's .claude/rules/memory.md only; no wrap-up skill.)",
+      "files": [
+        "fixtures/close-repo"
+      ],
+      "assertions": [
+        "HANDOFF.md is deleted if all work is done, OR kept and rewritten with what blocks the merge if work is unfinished (here expiry is not actually implemented, so keeping it is correct)",
+        "Every HANDOFF item is accounted for: done, moved to a home, or flagged as dropped/needing a decision",
+        "The 50% max-discount policy moves to a durable home (CLAUDE.md, rules file, constitution, spec or a test)",
+        "The one-code-per-order decision moves to a durable home or is flagged as unimplemented work before merge",
+        "The unfinished component test is not silently dropped (flagged as remaining work or done)",
+        "The double-discount lesson is in PITFALLS.md (added if missing)",
+        "Reports what moved where",
+        "Does not merge into main or push without being asked",
+        "No unrequested feature code is written while closing",
+        "No decision the user didn't make (e.g. expiry-day semantics) is written into CLAUDE.md, rules or code as policy; it's listed as an open decision instead"
+      ]
+    }
+  ]
+}
