@@ -3,7 +3,8 @@ name: memory-setup
 description: >-
   Set up shared, hierarchical PITFALLS.md memory in a repo: lessons live in a
   PITFALLS.md next to the code they're about, the agent sees only the headings in scope,
-  and a rule teaches it where and how to write new ones. Run once per repo, by hand.
+  and a rule teaches it where and how to write new ones. Optionally adds a private,
+  git-ignored HANDOFF.md that's loaded at session start. Run once per repo, by hand.
   Also migrates existing lessons files (a single big PITFALLS.md, LESSONS.md, gotchas,
   untracked or git-ignored notes) into the shared, scoped layout.
 disable-model-invocation: true
@@ -54,16 +55,25 @@ session. The rule file teaches where and how to write entries so they're found.
 6. **Point CLAUDE.md at it**, with one line, not a copy:
    `Pitfalls: see .claude/rules/memory.md (PITFALLS.md files, headings shown by scope).`
 
-7. **Offer the checker in CI** (offer, don't force): `scripts/check_pitfalls.py` flags
-   headings that won't be found (too long, vague), entries missing a cause or fix, and
-   the same heading in two places. Copy it to the repo's scripts and add one CI step,
-   or run it once now and report.
+7. **Offer a private HANDOFF.md, and install it only if they say yes.** Ask once:
+   "Do you want a private HANDOFF.md? It's your own note of where your work stands,
+   on your machine only, rewritten at the end of each session and loaded when the next
+   one starts." If yes:
+   - add `HANDOFF.md` to `.gitignore` (if a HANDOFF.md is already tracked, ask before
+     untracking it: `git rm --cached HANDOFF.md` keeps the file on disk);
+   - append `assets/handoff-rule.md` to `.claude/rules/memory.md` (its heading is
+     also what turns on loading HANDOFF.md at session start);
+   - if an old HANDOFF.md exists, keep it as the starting point, and move anything in
+     it the team should know to PITFALLS.md or CLAUDE.md.
+   If no, install nothing about handoff.
 
-8. **Run the checker** on the result, fix what it flags, and **report**: what you
-   created, moved (old place → new place), left alone, and the candidates you didn't add.
+8. **Run the checker** (`scripts/check_pitfalls.py`) on the result, fix what it flags,
+   and **report**: what you created, moved (old place → new place), left alone, the
+   candidates you didn't add, and whether the private handoff is on.
 
 ## Notes
 
 - Runs once per repo, started by hand (`/repo-memory:memory-setup`); it costs nothing
   in other sessions. The daily work is done by the rule file and the hooks.
-- The hooks are silent in repos without `.claude/rules/memory.md`.
+- The hooks are silent in repos without `.claude/rules/memory.md`. HANDOFF.md is
+  loaded only when that rule has the handoff section.

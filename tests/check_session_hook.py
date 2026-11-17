@@ -45,6 +45,11 @@ with tempfile.TemporaryDirectory() as d:
         f.write("\n## Empty order totals 0 instead of failing\n*Cause:* x\n")
     ctx = run(root, "tool", tool2)
     assert "Empty order" in ctx and "Applying a discount" not in ctx, "only the new heading"
+    (root / "HANDOFF.md").write_text("Next: wire codes into checkout\n")
+    assert "wire codes" not in run(root, "session-start", s), "handoff only when opted in"
+    with open(root / ".claude/rules/memory.md", "a") as f:
+        f.write("\n## HANDOFF.md: where your work stands (private, opted in)\n")
+    assert "wire codes" in run(root, "session-start", s), "handoff loaded when opted in"
     run(root, "session-start", s)  # compact/clear: start over
     assert "Applying a discount" in run(root, "tool", tool), "shown again after compaction"
 print("pitfalls hooks: ok")

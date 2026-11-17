@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """repo-memory hooks: hierarchical PITFALLS.md, headings only.
 
-session-start: show the root PITFALLS.md headings; forget what was shown (startup,
-               clear and compact all start from a clean slate, like nested CLAUDE.md).
+session-start: show the root PITFALLS.md headings, and the private HANDOFF.md if the
+               repo opted in; forget what was shown (startup, clear and compact all
+               start from a clean slate, like nested CLAUDE.md).
 tool:          after Read/Edit/Write on a file, show the headings of every PITFALLS.md
                from that file's folder up to the repo root that weren't shown yet.
 
@@ -16,6 +17,7 @@ import tempfile
 from pathlib import Path
 
 HEADER = "Pitfalls in scope (headings only; read the file when one is relevant):"
+MAX_HANDOFF_CHARS = 6000
 
 
 def headings(f: Path):
@@ -52,7 +54,21 @@ def main() -> int:
     if mode == "session-start":
         seen = {f"PITFALLS.md\t{h}" for h in headings(root_file)}
         state.write_text(json.dumps(sorted(seen)))
-        emit("SessionStart", [f'PITFALLS.md: "{h}"' for h in headings(root_file)])
+        parts = []
+        rule = (root / ".claude/rules/memory.md").read_text(encoding="utf-8", errors="replace")
+        handoff = root / "HANDOFF.md"
+        if "## HANDOFF.md" in rule and handoff.is_file():
+            text = handoff.read_text(encoding="utf-8", errors="replace").strip()
+            if len(text) > MAX_HANDOFF_CHARS:
+                text = text[:MAX_HANDOFF_CHARS] + "\n[... truncated; read HANDOFF.md for the rest]"
+            if text:
+                parts.append("Your HANDOFF.md (private; where your work stood at the end of the last session):\n" + text)
+        heads = [f'PITFALLS.md: "{h}"' for h in headings(root_file)]
+        if heads:
+            parts.append(HEADER + "\n" + "\n".join(heads))
+        if parts:
+            json.dump({"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                              "additionalContext": "\n\n".join(parts)}}, sys.stdout)
         return 0
 
     path = (data.get("tool_input") or {}).get("file_path") or (data.get("tool_input") or {}).get("notebook_path")
