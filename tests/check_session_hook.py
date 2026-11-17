@@ -50,6 +50,16 @@ with tempfile.TemporaryDirectory() as d:
     with open(root / ".claude/rules/memory.md", "a") as f:
         f.write("\n## HANDOFF.md: where your work stands (private, opted in)\n")
     assert "wire codes" in run(root, "session-start", s), "handoff loaded when opted in"
+    (root / "HANDOFF.md").write_text("\n".join(f"line {i}" for i in range(55)))
+    ctx = run(root, "session-start", s)
+    assert "line 39" in ctx and "line 40" not in ctx and "over" not in ctx.split("line 39")[0], "budget cut"
+    assert "only the first 40 were loaded" in ctx, ctx[-300:]
+    w = dict(s, hook_event_name="PostToolUse", tool_name="Write", tool_input={"file_path": str(root / "HANDOFF.md")})
+    assert "over its 40-line budget" in run(root, "tool", w)
+    (root / "HANDOFF.md").write_text("\n".join(f"l{i}" for i in range(34)))
+    assert "34 of 40" in run(root, "tool", w)
+    (root / "HANDOFF.md").write_text("Now: x\n")
+    assert run(root, "tool", w) == "", "small handoff: no nagging"
     run(root, "session-start", s)  # compact/clear: start over
     assert "Applying a discount" in run(root, "tool", tool), "shown again after compaction"
 print("pitfalls hooks: ok")

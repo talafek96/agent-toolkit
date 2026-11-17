@@ -1,11 +1,31 @@
 
 ## HANDOFF.md: where your work stands (private, opted in)
 
-- `HANDOFF.md` is **yours**: it's git-ignored and never shared. It's loaded when your
-  next session starts, so you (or your next agent) can pick up where you left off.
+`HANDOFF.md` is **yours**: git-ignored, never shared. It's your progress file: the
+next session reads it first to pick up where you left off (the same idea as a
+long-running agent's progress notes). It's loaded automatically at session start.
+
+**Budget: 40 lines.** Only the first 40 lines are loaded; the rest is cut off.
+You'll be told when you're near or over it. When that happens, rewrite it shorter
+before anything else.
+
 - **At the end of every session** ("wrap up", "let's stop", before a break),
-  **rewrite it. Replace it; don't append.** Keep only what your task list (e.g. Spec Kit's `tasks.md`) and
-  `git log` don't already hold: what's in flight, open decisions with your
-  recommendation, and the next steps. A few lines, not a story.
-- **It's not where lessons go.** Anything the team should know (a trap, a decision
-  that holds) goes to a `PITFALLS.md`, CLAUDE.md or a rule, where everyone sees it.
+  **rewrite it. Replace it; don't append.** It's a snapshot, not a log: yesterday's
+  details are in `git log`.
+- **Keep only what the next session needs and can't get elsewhere:**
+
+  ```markdown
+  # Handoff · <date>
+  ## Now
+  <one or two lines: what you're in the middle of>
+  ## Next
+  1. <first concrete step>
+  ## Open decisions
+  - <question> · I recommend <x> · <who decides>
+  ## Careful
+  - <something in flight that isn't obvious from the code>
+  ```
+
+- **Leave out** what's done (git has it), task lists (your `tasks.md` has them), and
+  anything the team should know: a trap goes to a `PITFALLS.md`, a lasting decision
+  to CLAUDE.md or a rule.
