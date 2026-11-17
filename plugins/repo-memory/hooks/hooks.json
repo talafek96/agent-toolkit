@@ -1,11 +1,19 @@
 {
-  "description": "Load the branch's HANDOFF.md and the PITFALLS.md headings at session start, only in repos that opted in with .claude/rules/memory.md",
+  "description": "Hierarchical PITFALLS.md: show only the headings of the PITFALLS.md files in scope, once per session. Only in repos that opted in with .claude/rules/memory.md.",
   "hooks": {
     "SessionStart": [
       {
         "matcher": "startup|resume|clear|compact",
         "hooks": [
-          { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py\"" }
+          { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pitfalls.py\" session-start" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Read|Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pitfalls.py\" tool" }
         ]
       }
     ]

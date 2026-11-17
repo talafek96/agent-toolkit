@@ -1,50 +1,61 @@
-# Repo memory
+# Pitfalls: what this repo taught us
 
-You start every session knowing nothing. These two files are the memory, and they
-live in the repo so the whole team (and every agent) shares them.
+You start every session knowing nothing. `PITFALLS.md` files are the team's shared
+memory of traps: committed, reviewed like code, and placed next to the code they're
+about. Any folder can have one.
 
-## PITFALLS.md: what we learned (shared, on main)
+## How you'll see them
 
-- **Write an entry in the same commit as the fix**, when the cause was not obvious
-  from the error: a trap the next person would fall into too. Not for typos or for
-  bugs the error message explains.
-- **Format:** `## <the symptom, as someone would search for it>`, then *Cause*,
-  *Fix*, and *Where it's fixed* (file, test or commit). A few lines, not a story.
-- **Before working in an area, read the entries whose headings match it.** The
-  headings are loaded at session start; read the full entry you need.
-- **When a check makes the trap impossible** (a test, a lint rule, a type), shrink the
-  entry to one line naming that check, or delete it. The best pitfall is one a check
-  now catches.
+You get only headings, never whole files. At session start: the root `PITFALLS.md`.
+When you read or edit a file: the headings of every `PITFALLS.md` from that file's
+folder up to the root, each labelled with its file, once per session. **When a heading
+touches what you're about to do, read that entry before you do it.**
 
-## HANDOFF.md: where this work stands (on its branch, never on main)
+## When to write one
 
-- **It belongs to the piece of work, not to a person.** It lives on the work's
-  branch, is committed and pushed, and anyone continuing the work reads it first.
-- **At the end of every session** ("wrap up", "let's stop", "hand this off", before a
-  break), **rewrite it. Replace it; don't append.** Write for a
-  fresh agent that has the repo but not this conversation: the goal; what's done and
-  *how each item was verified* (a test name, a manual check, or "not verified"); what's
-  next, in order; open decisions with your recommendation and who decides; anything in
-  flight that isn't obvious from the code. Point to specs or tasks; don't copy them, and
-  don't narrate the session.
-- **A decision is recorded only once someone made it.** If you need a choice nobody
-  made, put it under open decisions with your recommendation. Never write it into
-  CLAUDE.md, a rule or the code as if it were policy.
-- **Before the branch merges, close it.** Closing is bookkeeping, not implementation:
-  - Check each "done" item against the code and its tests. A placeholder test or an
-    unused constant is not done.
-  - Lessons and decisions that are already final move to their homes now, either way
-    (a pitfall that was fixed, a decision someone made). Don't hold them back.
-  - If anything is unfinished, don't delete HANDOFF.md and don't build the rest unasked:
-    rewrite it with what blocks the merge, and report.
-  - If everything is done and every lasting lesson is in its home (PITFALLS.md,
-    CLAUDE.md, a rules file, a spec), delete HANDOFF.md in the last commit.
-    `main` never carries a handoff.
-- **Commit memory files by name** (`git add HANDOFF.md PITFALLS.md …`), never everything
-  at once.
+- **In the same commit as the fix**, when the cause wasn't obvious from the error: a
+  trap the next person would fall into too. Not for typos, and not for problems the
+  error message already explains.
+- **First ask: can a check make this impossible?** A test, a lint rule, a type, an
+  assertion, an API that refuses the misuse. If yes, write the check instead. When a
+  check later catches an existing trap, delete its entry.
+- **Update, don't duplicate.** If an entry already covers it, improve that entry.
+
+## Where it goes
+
+1. List every place the mistake can be **made**, meaning where someone would be
+   editing when they make it. Not where the symptom shows up.
+2. Put the entry in the **nearest folder that contains all of those places**. Anyone
+   who could make the mistake passes through that scope, so it can't be missed.
+3. **Not higher.** A level too high loads it where it can't matter, and noise teaches
+   readers to skim.
+4. Follow the logical units: one component → its folder; two components → their
+   shared parent; anywhere in the repo → the root. Keep the root short.
+5. **One place only.** Never copy an entry into a second file.
+
+If the mistake is misusing an API from anywhere, prefer making the API refuse the
+misuse over parking the entry at the root.
+
+## How to write it so it's found
+
+Headings are all anyone sees, so the heading does the work.
+
+- **Name the trigger, not only the symptom:** the action that causes it, in the words of
+  the code someone would be touching. "Applying a discount anywhere but checkout doubles
+  it (SAVE10 gave 19%)", not "Discount bug".
+- **Use the names they'll be editing:** functions, config keys, commands, files.
+- **One trap per heading, 15 words at most.** No "Note:", "Important", dates or ticket
+  numbers. A heading that needs "and" is two pitfalls.
+- **Short body:** *Cause*, *Fix*, and *Where it's fixed* (file, test or commit) or the
+  check that now guards it. Longer explanations go in a doc the entry links to.
+
+```markdown
+## Applying a discount anywhere but checkout doubles it (SAVE10 gave 19%)
+*Cause:* checkout recomputed from a cart total that already had the discount.
+*Fix:* apply once, in `checkout()`. *Guarded by:* tests/comp/orders/test_checkout.py
+```
 
 ## What stays private
 
 Personal preferences about how *you* like to work go in `CLAUDE.local.md`
-(git-ignored). Anything about the project, its traps or its work goes in the files
-above, where the team can see it.
+(git-ignored). Anything about the project and its traps goes where the team sees it.
