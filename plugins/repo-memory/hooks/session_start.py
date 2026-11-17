@@ -29,7 +29,11 @@ def main() -> int:
         branch = ""
 
     handoff = root / "HANDOFF.md"
-    if handoff.is_file():
+    if handoff.is_file() and branch in ("main", "master"):
+        parts.append(f"WARNING: HANDOFF.md is on {branch}. A handoff belongs on its work's branch. "
+                     "Before other work, tell the user and offer to move it to its branch, or close it "
+                     "(lessons to PITFALLS.md / CLAUDE.md / rules, personal lines to CLAUDE.local.md, then delete it).")
+    elif handoff.is_file():
         text = handoff.read_text(encoding="utf-8", errors="replace")
         if len(text) > MAX_HANDOFF_CHARS:
             text = text[:MAX_HANDOFF_CHARS] + "\n[... HANDOFF.md truncated; read the file for the rest]"

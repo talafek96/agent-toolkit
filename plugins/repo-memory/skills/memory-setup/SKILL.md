@@ -63,9 +63,16 @@ collides with anyone else's.
 6. **Point CLAUDE.md at it,** with one line, not a copy:
    `Memory: see .claude/rules/memory.md (PITFALLS.md on main, HANDOFF.md per branch).`
 
-7. **Guard the merge (offer, don't force).** Suggest a line in the PR template:
-   `- [ ] HANDOFF.md closed (lessons moved, file deleted)`. If the repo uses CI, offer
-   a check that fails a pull request into `main` while `HANDOFF.md` is present.
+7. **Guard the merge, so a handoff can't reach `main`.** The rule asks the agent to
+   delete HANDOFF.md before merge; only CI can guarantee it.
+   - GitHub Actions: copy `assets/no-handoff-on-main.yml` to `.github/workflows/`.
+     It fails any pull request into `main` that still contains `HANDOFF.md`.
+   - Other CI: add the same check (fail if `HANDOFF.md` exists) to its PR pipeline.
+   - Then tell the user the one step only they can do: mark the check **required** in
+     the branch protection rules (on GitHub, the job is named `No HANDOFF.md`).
+     Without that, it warns but doesn't block.
+   - No CI at all: add `- [ ] HANDOFF.md closed (lessons moved, file deleted)` to the
+     PR template, and say plainly that nothing enforces it.
 
 8. **Report** what you created, changed and left alone, and the one habit that
    matters: end each session by saying "wrap up"; the rule file tells the agent what

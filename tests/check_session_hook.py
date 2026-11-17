@@ -26,4 +26,7 @@ with tempfile.TemporaryDirectory() as d:
     (root / ".claude/rules/memory.md").write_text("rule")
     ctx = json.loads(run(root))["hookSpecificOutput"]["additionalContext"]
     assert "Goal: X" in ctx and "## Totals off by a cent" in ctx and "Cause: floats" not in ctx, ctx
+    subprocess.run(["git", "-C", str(root), "checkout", "-q", "-b", "main"], check=True)
+    ctx = json.loads(run(root))["hookSpecificOutput"]["additionalContext"]
+    assert "WARNING: HANDOFF.md is on main" in ctx and "Goal: X" not in ctx, ctx
 print("session hook: ok")
