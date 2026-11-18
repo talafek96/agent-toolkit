@@ -1,0 +1,1165 @@
+#!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+"""Claude Code statusLine command: stdin JSON → ANSI status rows.
+
+Segment types (DEFAULT_LAYOUT): session_id, session_name, tasks (per-session
+``~/.claude/tasks/<session_id>/`` counts plus the active ``activeForm`` label),
+cost (client-side estimate at API list prices, shown as ``$X (API-equiv)``),
+billing_wall (labelled ``uptime`` — wall-clock session time), billing_api
+(labelled ``busy`` — API wait time), cost_session_lines (labelled ``edits`` —
+lines added/removed), rate_limits, transcript_path (optional segment; default
+layout uses ``transcript_below`` on the billing line instead), model, agent,
+thinking (shows the ``effort.level`` in parens when present — e.g.
+``thinking (high) ✓`` — and ``fast`` when ``fast_mode`` is on), tokens,
+context_pct (``used/total (pct%)`` with ``K``/``M``-suffixed counts when
+size is present), exceeds_200k, added_dirs, project_dir
+(``[branch↑·n↓·m <bash-git-prompt status>] path``), cwd_or_worktree
+(``[cwd branch↑·n↓·m <status>] path``; optional ``[worktree]``), output_style.
+The git status mirrors bash-git-prompt: ``●``staged ``✖``conflicts ``✚``changed
+``…``untracked ``⚑``stashed (with counts), or ``✔`` when the tree is clean.
+``version`` and ``effort`` remain available in ``_bind()`` for custom layouts
+but are not referenced by the default layout (``effort``'s level now renders
+inside ``thinking``).
+
+EOL: STATUSLINE_EOL=lf|crlf (env overrides DEFAULT_LINE_ENDING constant below).
+Colors: enabled by default (Claude Code uses a pipe, not a TTY). Set NO_COLOR=1 to disable.
+
+Invoke with uv as a standalone script (ignores adjacent pyproject): uv run --script statusline.py
+
+Debug logging is off. With ``WRITE_LOG = True``, each run appends to ``statusline.log`` in this
+script's directory (stdin + stdout, plain text), and valid stdin JSON is also written under
+``statusline_stdin/`` as a timestamped ``.json`` file (invalid JSON as ``*_invalid.txt``).
+
+**Maintainers:** Add a ``seg_*`` function, register it in ``_bind()``, and reference it from
+``DEFAULT_LAYOUT`` (or a custom layout dict). Git subprocess results for a resolved repo path
+are cached for the duration of one ``render()`` call — see ``_repo_git_snap``. All ``git`` subprocesses go through ``_git_run`` (shared kwargs and error handling). Nested payload slices use ``_workspace`` / ``_cost`` / ``_context_window`` / ``_rate_limits`` / ``_thinking``.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable
+
+# Env overrides this when set: lf | crlf (case-insensitive)
+DEFAULT_LINE_ENDING = "lf"
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+EXECUTION_LOG_PATH = SCRIPT_DIR / "statusline.log"
+STDIN_ARCHIVE_DIR = SCRIPT_DIR / "statusline_stdin"
+WRITE_LOG = False
+
+# Per-session task files written by Claude Code (one ``<task_id>.json`` per task).
+TASKS_DIR = Path.home() / ".claude" / "tasks"
+TASKS_ACTIVE_LABEL_MAX = 48
+
+# Workspace row: if visible width exceeds this, +dirs / project / cwd use folder leaf names only.
+WORKSPACE_LINE_MAX_VISIBLE = 80
+
+WORKSPACE_COMPACT_TYPES = frozenset({"added_dirs", "project_dir", "cwd_or_worktree"})
+
+# rate_limits payload keys → compact label for the status row
+_RATE_LIMIT_WINDOWS: tuple[tuple[str, str], ...] = (
+    ("five_hour", "5h"),
+    ("seven_day", "7d"),
+)
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;:]*m")
+
+RESET = "\033[0m"
+DIM = "\033[2m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+RED = "\033[31m"
+CYAN = "\033[36m"
+BLUE = "\033[34m"
+MAGENTA = "\033[35m"
+BOLD_GREEN = "\033[1;32m"
+BOLD_BLUE = "\033[1;34m"
+
+
+def use_color() -> bool:
+    # Claude Code statusLine subprocess: stdout is piped, not a TTY — isatty() is false.
+    return not os.environ.get("NO_COLOR")
+
+
+def line_terminator() -> str:
+    raw = os.environ.get("STATUSLINE_EOL", DEFAULT_LINE_ENDING).strip().lower()
+    if raw in ("crlf", "dos", "windows"):
+        return "\r\n"
+    return "\n"
+
+
+def _strip_ansi(s: str) -> str:
+    return _ANSI_ESCAPE_RE.sub("", s)
+
+
+def _visible_width(s: str) -> int:
+    """Character cells for the rendered line (ANSI stripped)."""
+    return len(_strip_ansi(s))
+
+
+def _collapse_home(path: str) -> str:
+    """Shorten a leading home directory to ``~`` for display; strip stray newlines."""
+    raw = path.replace("\n", " ").replace("\r", "")
+    home = os.path.expanduser("~")
+    if home and home != "~" and (raw == home or raw.startswith(home + os.sep)):
+        return "~" + raw[len(home) :]
+    return raw
+
+
+def _stdin_archive_stem(ts: datetime) -> str:
+    """Filesystem-safe UTC timestamp (aligned with log ``run`` line)."""
+    return ts.strftime("%Y%m%dT%H%M%S_%f") + "Z"
+
+
+def _write_stdin_archive(stdin_text: str, ts: datetime) -> None:
+    """Save stdin next to the script: pretty ``.json`` if parseable, else ``*_invalid.txt``."""
+    if not WRITE_LOG:
+        return
+    if not stdin_text.strip():
+        return
+    stem = _stdin_archive_stem(ts)
+    try:
+        STDIN_ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+        data = json.loads(stdin_text)
+        path = STDIN_ARCHIVE_DIR / f"{stem}.json"
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    except json.JSONDecodeError:
+        try:
+            (STDIN_ARCHIVE_DIR / f"{stem}_invalid.txt").write_text(stdin_text, encoding="utf-8")
+        except OSError:
+            pass
+    except OSError:
+        pass
+
+
+def _append_execution_log(
+    stdin_text: str,
+    stdout_text: str | None,
+    *,
+    error: str | None = None,
+    exit_code: int = 0,
+    run_at: datetime | None = None,
+) -> None:
+    """Append one run to EXECUTION_LOG_PATH; failures to write must not break the statusline."""
+    if not WRITE_LOG:
+        return
+    at = run_at or datetime.now(timezone.utc)
+    _write_stdin_archive(stdin_text, at)
+    ts = at.isoformat()
+    block: list[str] = [
+        "=" * 80,
+        f"--- run {ts} exit={exit_code} ---",
+        "--- stdin ---",
+        stdin_text if stdin_text else "(empty)",
+        "",
+    ]
+    if error is not None:
+        block.extend(["--- error ---", error, ""])
+    if stdout_text is not None:
+        block.extend(["--- stdout ---", _strip_ansi(stdout_text), ""])
+    else:
+        block.extend(["--- stdout ---", "(none)", ""])
+    block.append("=" * 80)
+    try:
+        with EXECUTION_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write("\n".join(block) + "\n\n")
+    except OSError:
+        pass
+
+
+def stylize(enabled: bool, code: str, text: str) -> str:
+    if not enabled or not text:
+        return text
+    return f"{code}{text}{RESET}"
+
+
+def dim(enabled: bool, s: str) -> str:
+    return stylize(enabled, DIM, s)
+
+
+def green(enabled: bool, s: str) -> str:
+    return stylize(enabled, GREEN, s)
+
+
+def yellow(enabled: bool, s: str) -> str:
+    return stylize(enabled, YELLOW, s)
+
+
+def red(enabled: bool, s: str) -> str:
+    return stylize(enabled, RED, s)
+
+
+def cyan(enabled: bool, s: str) -> str:
+    return stylize(enabled, CYAN, s)
+
+
+def pct_colored(enabled: bool, pct: float | int | None, s: str) -> str:
+    if pct is None or not enabled:
+        return s
+    p = float(pct)
+    if p < 40:
+        return green(enabled, s)
+    if p < 75:
+        return yellow(enabled, s)
+    return red(enabled, s)
+
+
+def _nested_str_field(d: dict[str, Any], section: str, *keys: str) -> str | None:
+    """First truthy value among ``d[section][k]`` for each ``k`` (skips non-dict section)."""
+    obj = d.get(section)
+    if not isinstance(obj, dict):
+        return None
+    for k in keys:
+        v = obj.get(k)
+        if v:
+            return str(v)
+    return None
+
+
+def _workspace(d: dict[str, Any]) -> dict[str, Any]:
+    return d.get("workspace") or {}
+
+
+def _cost(d: dict[str, Any]) -> dict[str, Any]:
+    return d.get("cost") or {}
+
+
+def _context_window(d: dict[str, Any]) -> dict[str, Any]:
+    return d.get("context_window") or {}
+
+
+def _rate_limits(d: dict[str, Any]) -> dict[str, Any]:
+    rl = d.get("rate_limits")
+    return rl if isinstance(rl, dict) else {}
+
+
+def _thinking(d: dict[str, Any]) -> dict[str, Any]:
+    t = d.get("thinking")
+    return t if isinstance(t, dict) else {}
+
+
+def fmt_time_until_reset(ts: Any) -> str:
+    """Human-readable time remaining until resets_at (UTC).
+
+    More than 24 hours left: compact days, e.g. ``3d`` or ``3d 4h``.
+    Otherwise: ``hours:minutes`` until reset (same calendar day style, not clock time).
+    """
+    if ts is None:
+        return "—"
+    try:
+        reset = datetime.fromtimestamp(float(ts), tz=timezone.utc)
+    except (ValueError, TypeError, OSError):
+        return str(ts)
+    now = datetime.now(timezone.utc)
+    sec = (reset - now).total_seconds()
+    if sec <= 0:
+        return "now"
+    day_s = 86400.0
+    if sec > 24 * 3600:
+        days = int(sec // day_s)
+        rem = sec - days * day_s
+        rh = int(rem // 3600)
+        if rh >= 1:
+            return f"{days}d {rh}h"
+        return f"{days}d"
+    total_minutes = int(sec // 60)
+    hours = total_minutes // 60
+    minutes = total_minutes % 60
+    return f"{hours}:{minutes:02d}"
+
+
+def seg_session_id(d: dict[str, Any], uc: bool) -> str | None:
+    raw = d.get("session_id")
+    if not raw:
+        return None
+    sid = str(raw).split("-")[0][:8]
+    if not sid:
+        return None
+    return dim(uc, sid)
+
+
+def seg_session_name(d: dict[str, Any], uc: bool) -> str | None:
+    name = d.get("session_name")
+    if not name:
+        return None
+    return str(name)
+
+
+def seg_transcript_path(d: dict[str, Any], uc: bool) -> str | None:
+    path = d.get("transcript_path")
+    if not path:
+        return None
+    return dim(uc, str(path))
+
+
+def _resolve_git_path(raw: str) -> str:
+    """Expand env/user and resolve existing dirs so ``git`` runs with a stable cwd."""
+    p = Path(os.path.expandvars(os.path.expanduser(raw.strip())))
+    try:
+        if p.exists():
+            return str(p.resolve())
+    except OSError:
+        pass
+    return os.path.normpath(raw)
+
+
+def _path_inside_or_same(child: str, parent: str) -> bool:
+    """True if ``child`` resolves under ``parent`` (same directory allowed)."""
+    try:
+        c = Path(child).resolve()
+        b = Path(parent).resolve()
+        c.relative_to(b)
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def _classify_porcelain(code: str) -> tuple[int, int, int, int]:
+    """Deltas ``(staged, conflicts, changed, untracked)`` for one two-char
+    ``git status --porcelain`` code, replicating bash-git-prompt's gitstatus.sh
+    parse *exactly* (so our counts match the shell prompt, quirks and all): it
+    matches the code, then trims the last character and re-matches, until empty.
+    """
+    staged = conflicts = changed = untracked = 0
+    status = code
+    while status:
+        if status == "??":
+            untracked += 1
+            break
+        # Two-char conflict forms (U?, ?U, DD, AA) terminate the loop.
+        if len(status) == 2 and (status[0] == "U" or status[1] == "U" or status in ("DD", "AA")):
+            conflicts += 1
+            break
+        # Non-terminating cases: score this char/pair, then drop the last char.
+        if len(status) == 2 and status[1] == "M":  # ?M  → worktree-changed
+            changed += 1
+        elif len(status) == 2 and status[1] == " ":  # ?<space> → nothing
+            pass
+        elif status == "U":  # lone U → conflict
+            conflicts += 1
+        elif status == " ":  # lone space → nothing
+            pass
+        else:  # anything else (incl. lone index letter) → staged
+            staged += 1
+        status = status[:-1]
+    return staged, conflicts, changed, untracked
+
+
+# Shared by all ``git`` subprocess calls (avoid per-call dict allocation on hot path).
+_GIT_SUBPROCESS_KW: dict[str, Any] = {
+    "capture_output": True,
+    "text": True,
+    "encoding": "utf-8",
+    "errors": "replace",
+}
+if sys.platform == "win32":
+    _GIT_SUBPROCESS_KW["creationflags"] = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+
+
+def _git_run(
+    args: list[str], *, cwd: str, timeout: float
+) -> subprocess.CompletedProcess[str] | None:
+    """Run ``git`` with shared kwargs; ``None`` on missing binary / OS errors / timeout."""
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            timeout=timeout,
+            **_GIT_SUBPROCESS_KW,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return None
+
+
+@dataclass(frozen=True)
+class _GitPromptCounts:
+    """bash-git-prompt file counts: staged / conflicts / changed / untracked / stashed."""
+
+    staged: int
+    conflicts: int
+    changed: int
+    untracked: int
+    stashed: int
+
+    @property
+    def clean(self) -> bool:
+        return not (self.staged or self.conflicts or self.changed or self.untracked or self.stashed)
+
+
+@dataclass(frozen=True)
+class _RepoGitSnap:
+    """One-shot git subprocess bundle for a resolved working tree (used by segment formatters)."""
+
+    accessible: bool
+    label: str | None
+    upstream_ab: tuple[int, int] | None
+    gitprompt: _GitPromptCounts | None
+
+
+# Populated for the lifetime of one ``render()``; ``None`` when segments run outside ``render`` (rare).
+_GIT_SNAP_CACHE: dict[str, _RepoGitSnap] | None = None
+
+
+def _git_prompt_counts(repo_r: str) -> _GitPromptCounts | None:
+    """File-count status matching bash-git-prompt: parse ``git status --porcelain
+    --branch`` the same way gitstatus.sh does, plus the stash-log entry count.
+    ``None`` if ``git status`` is unavailable."""
+    st = _git_run(
+        ["--no-optional-locks", "status", "--untracked-files=normal", "--porcelain", "--branch"],
+        cwd=repo_r,
+        timeout=12,
+    )
+    if st is None or st.returncode != 0:
+        return None
+
+    staged = conflicts = changed = untracked = 0
+    for line in (st.stdout or "").splitlines():
+        code = line[:2]
+        if code == "##":  # the --branch header line, not a file
+            continue
+        s, c, ch, u = _classify_porcelain(code)
+        staged += s
+        conflicts += c
+        changed += ch
+        untracked += u
+
+    # Stash count = number of stash-log entries (one line each), like git-prompt.
+    stashed = 0
+    sl = _git_run(["stash", "list"], cwd=repo_r, timeout=8)
+    if sl is not None and sl.returncode == 0:
+        stashed = sum(1 for _ in (sl.stdout or "").splitlines())
+
+    return _GitPromptCounts(staged, conflicts, changed, untracked, stashed)
+
+
+def _compute_repo_snap(repo_r: str) -> _RepoGitSnap:
+    chk = _git_run(["rev-parse", "--git-dir"], cwd=repo_r, timeout=3)
+    accessible = chk is not None and chk.returncode == 0
+
+    if not accessible:
+        return _RepoGitSnap(False, None, None, None)
+
+    label: str | None = None
+    b = _git_run(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_r, timeout=3)
+    if b is not None and b.returncode == 0:
+        ref = (b.stdout or "").strip()
+        if ref == "HEAD":
+            sh = _git_run(["rev-parse", "--short", "HEAD"], cwd=repo_r, timeout=3)
+            if sh is None:
+                label = None
+            elif sh.returncode == 0:
+                label = (sh.stdout or "").strip()
+            else:
+                label = "(detached)"
+        else:
+            label = ref
+
+    upstream_ab: tuple[int, int] | None = None
+    u = _git_run(["rev-parse", "-q", "--verify", "@{upstream}"], cwd=repo_r, timeout=3)
+    if u is not None and u.returncode == 0:
+        ah = _git_run(["rev-list", "--count", "@{upstream}..HEAD"], cwd=repo_r, timeout=8)
+        if ah is None:
+            upstream_ab = None
+        else:
+            bh = _git_run(["rev-list", "--count", "HEAD..@{upstream}"], cwd=repo_r, timeout=8)
+            if bh is None:
+                upstream_ab = None
+            else:
+                try:
+                    ahead = int((ah.stdout or "").strip() or "0") if ah.returncode == 0 else 0
+                    behind = int((bh.stdout or "").strip() or "0") if bh.returncode == 0 else 0
+                    upstream_ab = (ahead, behind)
+                except ValueError:
+                    upstream_ab = None
+
+    gitprompt = _git_prompt_counts(repo_r)
+    return _RepoGitSnap(True, label, upstream_ab, gitprompt)
+
+
+def _repo_git_snap(repo_r: str) -> _RepoGitSnap:
+    """Return git facts for ``repo_r`` (already resolved). Uses per-``render()`` cache when active."""
+    if _GIT_SNAP_CACHE is not None and repo_r in _GIT_SNAP_CACHE:
+        return _GIT_SNAP_CACHE[repo_r]
+    snap = _compute_repo_snap(repo_r)
+    if _GIT_SNAP_CACHE is not None:
+        _GIT_SNAP_CACHE[repo_r] = snap
+    return snap
+
+
+def _fmt_branch_remote(uc: bool, snap: _RepoGitSnap) -> str:
+    """``<branch><↑·n↓·m>`` — branch (magenta) with adjacent ahead/behind, git-prompt style."""
+    out = stylize(uc, MAGENTA, snap.label) if snap.label else ""
+    if snap.upstream_ab is not None:
+        out += _fmt_track_arrows(*snap.upstream_ab)
+    return out
+
+
+def _fmt_project_git_line(
+    uc: bool, repo_r: str, path_tail_parts: int | None, base: str
+) -> str:
+    """``[<branch><↑·↓·> <git-prompt status>] <path>`` for a git checkout; else path tail only."""
+    snap = _repo_git_snap(repo_r)
+    if not snap.accessible:
+        return _path_tail_display(base, path_tail_parts)
+
+    path_show = _path_tail_display(base, path_tail_parts)
+    br = _fmt_branch_remote(uc, snap)
+    status = _fmt_gitprompt_status(uc, snap.gitprompt) if snap.gitprompt is not None else ""
+
+    inner = " ".join(p for p in (br, status) if p)
+    if not inner:
+        return path_show
+    return f"[{inner}] {path_show}"
+
+
+def _fmt_cwd_git_line(
+    uc: bool,
+    path_tail_parts: int | None,
+    cwd_raw: str,
+    counts: _GitPromptCounts | None,
+    snap: _RepoGitSnap,
+) -> str:
+    """``[cwd <branch><↑·↓·> <git-prompt status>] <path>`` for an accessible git cwd."""
+    br = _fmt_branch_remote(uc, snap)
+    status = _fmt_gitprompt_status(uc, counts) if counts is not None else ""
+    parts = [p for p in ("cwd", br, status) if p]
+    path_show = _path_tail_display(str(cwd_raw), path_tail_parts)
+    return f"[{' '.join(parts)}] {path_show}"
+
+
+def _git_repo_accessible(repo_cwd: str) -> bool:
+    """True if ``git rev-parse --git-dir`` succeeds in ``repo_cwd``."""
+    key = _resolve_git_path(repo_cwd)
+    return _repo_git_snap(key).accessible
+
+
+def _path_tail_display(base: str, tail_parts: int | None) -> str:
+    """Show the last ``tail_parts`` path components (``None`` = full path)."""
+    norm = os.path.normpath(str(base))
+    parts = Path(norm).parts
+    if not parts:
+        return str(base)
+    if tail_parts is None:
+        k = len(parts)
+    else:
+        k = min(max(int(tail_parts), 1), len(parts))
+    seg = parts[-k:]
+    return os.path.join(*seg) if len(seg) > 1 else seg[0]
+
+
+def _path_part_count(path_str: str) -> int:
+    norm = os.path.normpath(str(path_str))
+    parts = Path(norm).parts
+    return max(1, len(parts))
+
+
+def _git_head_label(repo_r: str) -> str | None:
+    return _repo_git_snap(_resolve_git_path(repo_r)).label
+
+
+def _git_upstream_ahead_behind(repo_r: str) -> tuple[int, int] | None:
+    """``(ahead, behind)`` vs ``@{upstream}``, or ``None`` if no upstream."""
+    return _repo_git_snap(_resolve_git_path(repo_r)).upstream_ab
+
+
+def _fmt_track_arrows(ahead: int, behind: int) -> str:
+    """Upstream ahead/behind in bash-git-prompt symbols: ``↑·n`` / ``↓·m`` (concatenated)."""
+    parts: list[str] = []
+    if ahead > 0:
+        parts.append(f"↑·{ahead}")
+    if behind > 0:
+        parts.append(f"↓·{behind}")
+    return "".join(parts)
+
+
+def _fmt_gitprompt_status(uc: bool, counts: _GitPromptCounts) -> str:
+    """bash-git-prompt Single_line_Minimalist status glyphs (counts appended, no
+    inner separator): ``●``staged (red), ``✖``conflicts (red), ``✚``changed
+    (blue), ``…``untracked (cyan), ``⚑``stashed (bold blue), or ``✔`` (bold
+    green) when the tree is clean."""
+    if counts.clean:
+        return stylize(uc, BOLD_GREEN, "✔")
+    bits: list[str] = []
+    if counts.staged:
+        bits.append(stylize(uc, RED, f"●{counts.staged}"))
+    if counts.conflicts:
+        bits.append(stylize(uc, RED, f"✖{counts.conflicts}"))
+    if counts.changed:
+        bits.append(stylize(uc, BLUE, f"✚{counts.changed}"))
+    if counts.untracked:
+        bits.append(stylize(uc, CYAN, f"…{counts.untracked}"))
+    if counts.stashed:
+        bits.append(stylize(uc, BOLD_BLUE, f"⚑{counts.stashed}"))
+    return "".join(bits)
+
+
+def _fmt_ms_duration(ms: Any) -> str | None:
+    try:
+        ms_i = int(float(ms))
+    except (TypeError, ValueError):
+        return None
+    if ms_i < 0:
+        return None
+    sec = ms_i // 1000
+    if sec < 60:
+        return f"{sec}s"
+    minutes, s = divmod(sec, 60)
+    if minutes < 60:
+        return f"{minutes}m{s:02d}s" if s else f"{minutes}m"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}m" if minutes else f"{hours}h"
+
+
+def _seg_cost_duration(d: dict[str, Any], uc: bool, *, ms_key: str, label: str) -> str | None:
+    cost = _cost(d)
+    ms = cost.get(ms_key)
+    s = _fmt_ms_duration(ms)
+    if not s:
+        return None
+    return f"{label} {s}" if not uc else f"{dim(uc, label)} {s}"
+
+
+def seg_billing_wall(d: dict[str, Any], uc: bool) -> str | None:
+    # Wall-clock time since the session started (``total_duration_ms``).
+    return _seg_cost_duration(d, uc, ms_key="total_duration_ms", label="uptime")
+
+
+def seg_billing_api(d: dict[str, Any], uc: bool) -> str | None:
+    # Time spent waiting on the model API only — the active subset of uptime.
+    return _seg_cost_duration(d, uc, ms_key="total_api_duration_ms", label="busy")
+
+
+def seg_cost_session_lines(d: dict[str, Any], uc: bool) -> str | None:
+    """Session/API line totals from ``cost`` (not git)."""
+    cost = _cost(d)
+    added = cost.get("total_lines_added")
+    removed = cost.get("total_lines_removed")
+    if added is None and removed is None:
+        return None
+    label = "edits"
+    bits = []
+    if added is not None:
+        bits.append(f"+{added}" if not uc else green(uc, f"+{added}"))
+    if removed is not None:
+        bits.append(f"−{removed}" if not uc else red(uc, f"−{removed}"))
+    if not bits:
+        return None
+    mid = "/".join(bits)
+    return f"{label} {mid}" if not uc else f"{dim(uc, label)} {mid}"
+
+
+def seg_model(d: dict[str, Any], uc: bool) -> str | None:
+    return _nested_str_field(d, "model", "display_name", "id")
+
+
+def seg_agent(d: dict[str, Any], uc: bool) -> str | None:
+    return _nested_str_field(d, "agent", "name")
+
+
+def seg_effort(d: dict[str, Any], uc: bool) -> str | None:
+    return _nested_str_field(d, "effort", "level")
+
+
+def seg_thinking(d: dict[str, Any], uc: bool) -> str | None:
+    t = _thinking(d)
+    en = t.get("enabled")
+    chunks: list[str] = []
+    if en is True:
+        # ``thinking`` carries only ``enabled``; the level comes from ``effort.level``
+        # (absent when the model does not support effort → plain ``thinking ✓``).
+        level = seg_effort(d, uc)
+        label = f"thinking ({level}) ✓" if level else "thinking ✓"
+        chunks.append(cyan(uc, label) if uc else label)
+    elif en is False:
+        chunks.append(dim(uc, "thinking ✗"))
+    if d.get("fast_mode") is True:
+        chunks.append(red(uc, "fast") if uc else "fast")
+    return " · ".join(chunks) if chunks else None
+
+
+def seg_tokens(d: dict[str, Any], uc: bool) -> str | None:
+    cw = _context_window(d)
+    inp = cw.get("total_input_tokens")
+    out = cw.get("total_output_tokens")
+    if inp is None and out is None:
+        return None
+    parts = []
+    if inp is not None:
+        parts.append(f"{inp}in")
+    if out is not None:
+        parts.append(f"{out}out")
+    return " + ".join(parts)
+
+
+def _fmt_tokens_km(n: int) -> str:
+    """Compact token counts: ``K`` for thousands, ``M`` for millions (at most one decimal)."""
+    if n < 0:
+        return f"-{_fmt_tokens_km(-n)}"
+    if n < 1000:
+        return str(n)
+    if n < 1_000_000:
+        v = n / 1000.0
+        if abs(v - round(v)) < 1e-9:
+            return f"{int(round(v))}K"
+        s = f"{v:.1f}".rstrip("0").rstrip(".")
+        return f"{s}K"
+    v = n / 1_000_000.0
+    if abs(v - round(v)) < 1e-9:
+        return f"{int(round(v))}M"
+    s = f"{v:.1f}".rstrip("0").rstrip(".")
+    return f"{s}M"
+
+
+def seg_context_pct(d: dict[str, Any], uc: bool) -> str | None:
+    cw = _context_window(d)
+    pct = cw.get("used_percentage")
+    size = cw.get("context_window_size")
+    if pct is None:
+        return None
+    try:
+        pf = float(pct)
+    except (TypeError, ValueError):
+        chunk = f"{pct}%"
+        return pct_colored(uc, None, chunk)
+
+    pct_disp = int(round(pf))
+    sz: int | None = None
+    if size is not None:
+        try:
+            sz = int(float(size))
+        except (TypeError, ValueError):
+            sz = None
+
+    if sz is not None:
+        used = int(round(pf / 100.0 * float(sz)))
+        used = max(0, min(used, sz))
+        chunk = f"{_fmt_tokens_km(used)}/{_fmt_tokens_km(sz)} ({pct_disp}%)"
+    else:
+        chunk = f"{pct_disp}%"
+
+    return pct_colored(uc, pf, chunk)
+
+
+def seg_exceeds_200k(d: dict[str, Any], uc: bool) -> str | None:
+    if d.get("exceeds_200k_tokens"):
+        s = "[⚠ EXCEEDS 200k]"
+        return red(uc, s) if uc else s
+    return None
+
+
+def seg_project_dir(
+    d: dict[str, Any], uc: bool, *, path_tail_parts: int | None = None
+) -> str | None:
+    ws = _workspace(d)
+    pdir = ws.get("project_dir")
+    if not pdir:
+        return None
+    base = str(pdir)
+    repo_r = _resolve_git_path(base)
+    return _fmt_project_git_line(uc, repo_r, path_tail_parts, base)
+
+
+def _fmt_usd_sig(v: float, sig: int = 3) -> str:
+    """USD string with ``sig`` significant digits (e.g. ``.3g``)."""
+    return f"${format(v, f'.{sig}g')}"
+
+
+def seg_cost(d: dict[str, Any], uc: bool) -> str | None:
+    # ``total_cost_usd`` is a client-side *estimate* at API list prices — not the
+    # enterprise-subscription bill — so it is qualified as ``(API-equiv)``.
+    cost = _cost(d)
+    usd = cost.get("total_cost_usd")
+    if usd is None:
+        return None
+    try:
+        amount = _fmt_usd_sig(float(usd))
+    except (TypeError, ValueError):
+        amount = f"${usd}"
+    qualifier = "(API-equiv)"
+    return f"{amount} {dim(uc, qualifier)}" if uc else f"{amount} {qualifier}"
+
+
+def seg_rate_limits(d: dict[str, Any], uc: bool) -> str | None:
+    rl = _rate_limits(d)
+    if not rl:
+        return None
+    parts: list[str] = []
+    for win_key, label in _RATE_LIMIT_WINDOWS:
+        bucket = rl.get(win_key) or {}
+        pct = bucket.get("used_percentage")
+        if pct is None:
+            continue
+        ps = f"{label}: {int(pct)}% ({fmt_time_until_reset(bucket.get('resets_at'))})"
+        parts.append(pct_colored(uc, int(pct), ps))
+    return "  ".join(parts) if parts else None
+
+
+def _paths_effectively_same(a: str | None, b: str | None) -> bool:
+    if not a or not b:
+        return False
+    return os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
+
+
+def seg_cwd_or_worktree(
+    d: dict[str, Any], uc: bool, *, path_tail_parts: int | None = None
+) -> str | None:
+    ws = _workspace(d)
+    cwd = ws.get("current_dir") or d.get("cwd")
+    pdir = ws.get("project_dir")
+    wt = ws.get("git_worktree")
+    chunks: list[str] = []
+    if wt:
+        chunks.append(f"[worktree] {wt}")
+    show_cwd = bool(cwd) and (
+        not pdir or not _paths_effectively_same(str(cwd), str(pdir))
+    )
+    if not show_cwd:
+        return "  ".join(chunks) if chunks else None
+
+    cwd_n = _resolve_git_path(str(cwd))
+    snap_cwd = _repo_git_snap(cwd_n)
+    counts = snap_cwd.gitprompt
+    if counts is None and pdir:
+        pn = _resolve_git_path(str(pdir))
+        if _path_inside_or_same(cwd_n, pn):
+            counts = _repo_git_snap(pn).gitprompt
+
+    if not snap_cwd.accessible:
+        line = f"[cwd] {_path_tail_display(str(cwd), path_tail_parts)}"
+    else:
+        line = _fmt_cwd_git_line(uc, path_tail_parts, str(cwd), counts, snap_cwd)
+    chunks.append(line)
+    return "  ".join(chunks) if chunks else None
+
+
+def seg_added_dirs(d: dict[str, Any], uc: bool, *, leaves_only: bool = False) -> str | None:
+    ws = _workspace(d)
+    dirs = ws.get("added_dirs") or []
+    if not dirs:
+        return None
+
+    def fmt_one(x: Any) -> str:
+        s = str(x).rstrip("/\\")
+        if not leaves_only:
+            return s
+        name = Path(s).name
+        return name if name else s
+
+    shown = ", ".join(fmt_one(x) for x in dirs[:3])
+    if len(dirs) > 3:
+        shown += f" (+{len(dirs) - 3})"
+    return f"+dirs: {shown}"
+
+
+def seg_version(d: dict[str, Any], uc: bool) -> str | None:
+    v = d.get("version")
+    return f"v{v}" if v else None
+
+
+def seg_output_style(d: dict[str, Any], uc: bool) -> str | None:
+    return _nested_str_field(d, "output_style", "name")
+
+
+def _read_session_tasks(session_id: str) -> list[dict[str, Any]]:
+    """All task dicts persisted under ``~/.claude/tasks/<session_id>/``.
+
+    One ``<task_id>.json`` per task. Files written mid-tick (incomplete JSON)
+    or missing between ``glob`` and ``open`` are skipped silently — statusline
+    must never raise. Sort prefers numeric stems (Claude writes ``1.json``…``N.json``).
+    """
+    sdir = TASKS_DIR / session_id
+    if not sdir.is_dir():
+        return []
+    try:
+        entries = list(sdir.glob("*.json"))
+    except OSError:
+        return []
+
+    def sort_key(p: Path) -> tuple[int, int, str]:
+        try:
+            return (0, int(p.stem), "")
+        except ValueError:
+            return (1, 0, p.stem)
+
+    tasks: list[dict[str, Any]] = []
+    for path in sorted(entries, key=sort_key):
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                obj = json.load(f)
+        except (OSError, json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(obj, dict):
+            tasks.append(obj)
+    return tasks
+
+
+def seg_tasks(d: dict[str, Any], uc: bool) -> str | None:
+    """``tasks <done>/<total> ✓ <active>▶ · <activeForm>`` for the current session.
+
+    The fraction is completed-out-of-total (pending is implicit: total − done − active).
+    Active count and ``activeForm`` label appear when at least one task is
+    ``in_progress``; active label uses ``activeForm`` (fallback ``subject``),
+    truncated to ``TASKS_ACTIVE_LABEL_MAX``. When every task is completed, the
+    suffix becomes ``· all done``.
+    """
+    sid = d.get("session_id")
+    if not sid:
+        return None
+    tasks = _read_session_tasks(str(sid))
+    if not tasks:
+        return None
+
+    done = active = 0
+    active_label: str | None = None
+    for t in tasks:
+        status = t.get("status")
+        if status == "completed":
+            done += 1
+        elif status == "in_progress":
+            active += 1
+            if active_label is None:
+                lbl = t.get("activeForm") or t.get("subject")
+                if lbl:
+                    active_label = str(lbl)
+
+    total = len(tasks)
+    fraction = f"{done}/{total} ✓"
+    bits: list[str] = [green(uc, fraction) if uc else fraction]
+    if active:
+        bits.append(yellow(uc, f"{active}▶") if uc else f"{active}▶")
+
+    label = dim(uc, "tasks") if uc else "tasks"
+    out = f"{label} {' '.join(bits)}"
+
+    if active_label:
+        if len(active_label) > TASKS_ACTIVE_LABEL_MAX:
+            active_label = active_label[: TASKS_ACTIVE_LABEL_MAX - 1] + "…"
+        suffix = yellow(uc, active_label) if uc else active_label
+        out += f" · {suffix}"
+    elif done == total:
+        suffix = green(uc, "all done") if uc else "all done"
+        out += f" · {suffix}"
+
+    return out
+
+
+def _bind(uc: bool) -> dict[str, Callable[[dict[str, Any]], str | None]]:
+    def w(fn: Callable[[dict[str, Any], bool], str | None]) -> Callable[[dict[str, Any]], str | None]:
+        return lambda d: fn(d, uc)
+
+    return {
+        "session_id": w(seg_session_id),
+        "session_name": w(seg_session_name),
+        "transcript_path": w(seg_transcript_path),
+        "billing_wall": w(seg_billing_wall),
+        "billing_api": w(seg_billing_api),
+        "cost_session_lines": w(seg_cost_session_lines),
+        "model": w(seg_model),
+        "agent": w(seg_agent),
+        "effort": w(seg_effort),
+        "thinking": w(seg_thinking),
+        "tokens": w(seg_tokens),
+        "context_pct": w(seg_context_pct),
+        "exceeds_200k": w(seg_exceeds_200k),
+        "project_dir": w(seg_project_dir),
+        "cost": w(seg_cost),
+        "rate_limits": w(seg_rate_limits),
+        "cwd_or_worktree": w(seg_cwd_or_worktree),
+        "added_dirs": w(seg_added_dirs),
+        "version": w(seg_version),
+        "output_style": w(seg_output_style),
+        "tasks": w(seg_tasks),
+    }
+
+
+DEFAULT_LAYOUT: dict[str, Any] = {
+    "lines": [
+        {
+            "separator": " | ",
+            "segments": [
+                {"type": "session_id"},
+                {"type": "session_name"},
+                {"type": "tasks"},
+            ],
+        },
+        {
+            "separator": " | ",
+            "segments": [
+                {"type": "added_dirs"},
+                {"type": "project_dir"},
+                {"type": "cwd_or_worktree"},
+            ],
+        },
+        {
+            "separator": " · ",
+            "segments": [
+                {"type": "model"},
+                {"type": "agent"},
+                {"type": "output_style"},
+                {"type": "thinking"},
+                {"type": "context_pct"},
+                {"type": "exceeds_200k"},
+            ],
+        },
+        {
+            "separator": " | ",
+            "segments": [
+                {"type": "cost"},
+                {"type": "billing_wall"},
+                {"type": "billing_api"},
+                {"type": "cost_session_lines"},
+                {"type": "rate_limits"},
+            ],
+            "transcript_below": True,
+        },
+    ]
+}
+
+
+def _workspace_row_join(
+    payload: dict[str, Any],
+    uc: bool,
+    sep: str,
+    proj_parts: int,
+    cwd_parts: int,
+    dirs_leaves: bool,
+) -> str:
+    parts: list[str] = []
+    ad = seg_added_dirs(payload, uc, leaves_only=dirs_leaves)
+    if ad:
+        parts.append(ad)
+    pd = seg_project_dir(payload, uc, path_tail_parts=proj_parts)
+    if pd:
+        parts.append(pd)
+    cw = seg_cwd_or_worktree(payload, uc, path_tail_parts=cwd_parts)
+    if cw:
+        parts.append(cw)
+    return sep.join(parts)
+
+
+def _best_workspace_tails(payload: dict[str, Any], uc: bool, sep: str) -> tuple[int, int, bool]:
+    """Pick path tail depths (+dirs leaf mode) so the workspace row fits in ``WORKSPACE_LINE_MAX_VISIBLE`` while maximizing tail depth."""
+    ws = _workspace(payload)
+    pdir = ws.get("project_dir")
+    cwd_raw = ws.get("current_dir") or payload.get("cwd")
+    show_cwd = bool(cwd_raw) and (
+        not pdir or not _paths_effectively_same(str(cwd_raw), str(pdir))
+    )
+
+    max_pk = _path_part_count(pdir) if pdir else 1
+    max_ck = _path_part_count(cwd_raw) if show_cwd and cwd_raw else 1
+
+    row = _workspace_row_join(payload, uc, sep, max_pk, max_ck, False)
+    if _visible_width(row) <= WORKSPACE_LINE_MAX_VISIBLE:
+        return max_pk, max_ck, False
+
+    row = _workspace_row_join(payload, uc, sep, max_pk, max_ck, True)
+    if _visible_width(row) <= WORKSPACE_LINE_MAX_VISIBLE:
+        return max_pk, max_ck, True
+
+    pk, ck = 1, 1
+    dirs_leaves = True
+    while True:
+        row = _workspace_row_join(payload, uc, sep, pk, ck, dirs_leaves)
+        if _visible_width(row) > WORKSPACE_LINE_MAX_VISIBLE:
+            break
+        grown = False
+        if pk < max_pk:
+            test = _workspace_row_join(payload, uc, sep, pk + 1, ck, dirs_leaves)
+            if _visible_width(test) <= WORKSPACE_LINE_MAX_VISIBLE:
+                pk += 1
+                grown = True
+                continue
+        if ck < max_ck:
+            test = _workspace_row_join(payload, uc, sep, pk, ck + 1, dirs_leaves)
+            if _visible_width(test) <= WORKSPACE_LINE_MAX_VISIBLE:
+                ck += 1
+                grown = True
+                continue
+        if not grown:
+            break
+    return pk, ck, dirs_leaves
+
+
+def _collect_line_parts(
+    line: dict[str, Any],
+    segs: dict[str, Callable[[dict[str, Any]], str | None]],
+    payload: dict[str, Any],
+) -> list[str]:
+    parts: list[str] = []
+    for seg in line["segments"]:
+        fn = segs.get(seg["type"])
+        if fn is None:
+            continue
+        piece = fn(payload)
+        if piece:
+            parts.append(piece)
+    return parts
+
+
+def render(layout: dict[str, Any], payload: dict[str, Any], uc: bool) -> str:
+    global _GIT_SNAP_CACHE
+    prev_cache = _GIT_SNAP_CACHE
+    _GIT_SNAP_CACHE = {}
+    try:
+        segs = _bind(uc)
+        eol = line_terminator()
+        rows = []
+        for line in layout["lines"]:
+            sep = line["separator"]
+            types = {s["type"] for s in line["segments"]}
+            if types == WORKSPACE_COMPACT_TYPES:
+                pk, ck, dleaves = _best_workspace_tails(payload, uc, sep)
+                row = _workspace_row_join(payload, uc, sep, pk, ck, dleaves)
+            else:
+                parts = _collect_line_parts(line, segs, payload)
+                row = sep.join(parts)
+            rows.append(row)
+            if line.get("transcript_below"):
+                tp = payload.get("transcript_path")
+                # Only when the billing row above is non-empty; show the full path
+                # (home collapsed to ``~``) rather than trimming it to the row width.
+                if tp and _visible_width(row) > 0:
+                    rows.append(dim(uc, _collapse_home(str(tp))))
+        return eol.join(rows) + eol
+    finally:
+        _GIT_SNAP_CACHE = prev_cache
+
+
+def main() -> int:
+    raw = sys.stdin.read()
+    if not raw.strip():
+        _append_execution_log(raw, "", exit_code=0)
+        return 0
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(f"statusline: invalid JSON: {e}", file=sys.stderr)
+        _append_execution_log(raw, None, error=str(e), exit_code=1)
+        return 1
+
+    if not isinstance(payload, dict):
+        print("statusline: expected JSON object", file=sys.stderr)
+        _append_execution_log(raw, None, error="expected JSON object", exit_code=1)
+        return 1
+
+    uc = use_color()
+    out = render(DEFAULT_LAYOUT, payload, uc)
+    _append_execution_log(raw, out, exit_code=0)
+    sys.stdout.buffer.write(out.encode("utf-8"))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

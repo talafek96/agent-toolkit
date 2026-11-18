@@ -32,5 +32,6 @@ jobs:
           python plugins/agent-context/skills/claude-md-standards/scripts/lint_claude_md.py --help
           python plugins/agent-context/skills/constitution-writer/scripts/check_constitution.py tests/fixtures/good-constitution.md
           python tests/check_session_hook.py
+          python tests/check_statusline.py
           python plugins/repo-memory/skills/memory-setup/scripts/check_pitfalls.py tests/fixtures/pitfalls/a
           ! python plugins/repo-memory/skills/memory-setup/scripts/check_pitfalls.py tests/fixtures/pitfalls

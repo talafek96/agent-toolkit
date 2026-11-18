@@ -20,6 +20,11 @@
       "name": "orchestrate",
       "source": "./plugins/orchestrate",
       "description": "Lead a feature as the senior engineer: a strong model plans, briefs cheaper subagents, reviews their work adversarially and reports at checkpoints, raising to you only what truly needs you."
+    },
+    {
+      "name": "statusline",
+      "source": "./plugins/statusline",
+      "description": "A four-row status line: session and tasks, project and git status, model and context used, cost, time and rate limits. Installed by hand with /statusline:setup."
     }
   ]
 }

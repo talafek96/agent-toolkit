@@ -8,6 +8,7 @@ Plugins for making a repo work well with coding agents. Installable as a
 | `agent-context` | `claude-md-standards`, `constitution-writer` | Quality for the files the agent reads every session. **claude-md-standards** writes, lints and reviews `CLAUDE.md` / `AGENTS.md`, keeping only what the agent wouldn't do untold (ships a linter). **constitution-writer** writes or reviews a project constitution: a few general principles, each with its why. In an existing repo it asks the people who built it instead of guessing the reasons, routes every specific rule to the right file, and wires the result into `CLAUDE.md`. |
 | `repo-memory` | `memory-setup` (once per repo) and `prune-pitfalls` (now and then), both started by hand | Shared lessons, kept where they're found: a `PITFALLS.md` in any folder, next to the code it's about. Hooks show the agent only the **headings** in scope (the root file at session start; a folder's file, and its parents', when the agent reads or edits there), once per session; it opens an entry when a heading is relevant. A rule teaches where an entry goes (the nearest folder containing every place the mistake can be made) and how to write a heading that's found. Includes a checker, and `prune-pitfalls`: deletes entries a check now guards or whose code is gone, merges duplicates, moves misplaced entries, with evidence for each, and commits only after you approve. Setup also offers a private, git-ignored `HANDOFF.md`: a progress snapshot (now, next, open decisions, careful) rewritten each session, loaded at session start, with a 40-line budget the hook enforces the way auto memory caps `MEMORY.md`. Personal preferences go in git-ignored `CLAUDE.local.md`. |
 | `orchestrate` | `orchestrate` | Lead a feature as the senior engineer: understand the design, brief cheaper subagents with how / what / why, review every deliverable against the design, and report at checkpoints. Raises to you only what truly needs you. Start it with `/orchestrate <feature or spec>`. |
+| `statusline` | `setup` (started by hand) | A four-row status line: session and tasks; project, branch and git status; model, thinking and context used; cost estimate, time, edits and rate limits, then the transcript path. Plugins can't set a status line themselves, so `/statusline:setup` copies the script next to your settings and points `statusLine` at the copy. It asks before replacing a status line you already have. Run it again after an update to get the new version. Personal: install it at **user** scope. |
 
 ## Install
 
@@ -18,6 +19,7 @@ In Claude Code:
 /plugin install agent-context@agent-toolkit
 /plugin install repo-memory@agent-toolkit
 /plugin install orchestrate@agent-toolkit
+/plugin install statusline@agent-toolkit   # user scope, then /statusline:setup
 ```
 
 When asked for the scope, choose **project** to give the whole team the plugins: they're

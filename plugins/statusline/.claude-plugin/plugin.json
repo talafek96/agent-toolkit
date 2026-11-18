@@ -1,0 +1,10 @@
+{
+  "name": "statusline",
+  "version": "1.0.0",
+  "description": "A four-row status line: session and tasks, project and git status, model and context used, cost, time and rate limits. Installed by hand with /statusline:setup.",
+  "author": { "name": "Tal Afek", "url": "https://github.com/talafek96" },
+  "homepage": "https://github.com/talafek96/agent-toolkit",
+  "repository": "https://github.com/talafek96/agent-toolkit",
+  "license": "Apache-2.0",
+  "keywords": ["statusline", "status line", "git", "context", "rate limits"]
+}

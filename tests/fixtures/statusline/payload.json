@@ -1,0 +1,29 @@
+{
+  "session_id": "3f2a9c1e-0000-4000-8000-000000000000",
+  "session_name": "checkout refactor",
+  "transcript_path": "/tmp/example/transcript.jsonl",
+  "cwd": "/tmp/example/shop",
+  "model": { "id": "claude-opus-5-5", "display_name": "Opus 5.5" },
+  "workspace": { "current_dir": "/tmp/example/shop", "project_dir": "/tmp/example/shop", "added_dirs": [] },
+  "version": "2.5.0",
+  "output_style": { "name": "default" },
+  "thinking": { "enabled": true },
+  "effort": { "level": "high" },
+  "cost": {
+    "total_cost_usd": 1.234,
+    "total_duration_ms": 720000,
+    "total_api_duration_ms": 300000,
+    "total_lines_added": 120,
+    "total_lines_removed": 8
+  },
+  "context_window": {
+    "total_input_tokens": 50000,
+    "total_output_tokens": 12000,
+    "context_window_size": 200000,
+    "used_percentage": 31
+  },
+  "rate_limits": {
+    "five_hour": { "used_percentage": 40, "resets_at": 4102444800 },
+    "seven_day": { "used_percentage": 12, "resets_at": 4102444800 }
+  }
+}
